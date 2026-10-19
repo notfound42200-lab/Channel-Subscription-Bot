@@ -155,25 +155,84 @@ def admin_notify(call):
 
 # --- APPROVAL & EXPIRY ---
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('app_'))
 def approve_now(call):
     _, u_id, ch_id, mins = call.data.split('_')
     u_id, ch_id, mins = int(u_id), int(ch_id), int(mins)
-    
+
     try:
         expiry_datetime = datetime.now() + timedelta(minutes=mins)
         expiry_ts = int(expiry_datetime.timestamp())
 
-        # Link expires when sub ends
-        link = bot.create_chat_invite_link(ch_id, member_limit=1, expire_date=expiry_ts)
-        
-        users_col.update_one({"user_id": u_id, "channel_id": ch_id}, {"$set": {"expiry": expiry_datetime.timestamp()}}, upsert=True)
-        
-        bot.send_message(u_id, f"🥳 *Payment Approved!*\n\nSubscription: {mins} Minutes\n\nJoin Link: {link.invite_link}\n\n⚠️ Note: This link and your access will expire in {mins} minutes.", parse_mode="Markdown")
-        bot.edit_message_text(f"✅ Approved user {u_id} for {mins} mins.", call.message.chat.id, call.message.message_id)
-        
+        # Create a single-use invite link that expires with the subscription
+        link = bot.create_chat_invite_link(
+            ch_id,
+            member_limit=1,
+            expire_date=expiry_ts
+        )
+
+        users_col.update_one(
+            {"user_id": u_id, "channel_id": ch_id},
+            {"$set": {"expiry": expiry_datetime.timestamp()}},
+            upsert=True
+        )
+
+        bot.send_message(
+            u_id,
+            f"🥳 *Payment Approved!*\n\n"
+            f"Subscription: {mins} Minutes\n\n"
+            f"Join Link: {link.invite_link}\n\n"
+            f"⚠️ Note: This link and your access will expire in {mins} minutes.",
+            parse_mode="Markdown"
+        )
+
+        bot.edit_message_text(
+            f"✅ Approved user {u_id} for {mins} mins.",
+            call.message.chat.id,
+            call.message.message_id
+        )
+
+        bot.answer_callback_query(call.id, "Payment approved!")
+
     except Exception as e:
-        bot.send_message(ADMIN_ID, f"❌ Error: {e}")
+        bot.answer_callback_query(call.id, "Approval failed.", show_alert=True)
+        bot.send_message(ADMIN_ID, f"❌ Approval Error: {e}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rej_'))
+def reject_now(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(
+            call.id, "Not authorized.", show_alert=True
+        )
+        return
+
+    try:
+        # Expected callback format: rej_USERID_CHANNELID_MINUTES
+        parts = call.data.split('_')
+        u_id = int(parts[1])
+
+        bot.send_message(
+            u_id,
+            "❌ Your payment request was rejected by the admin. "
+            "Please contact the admin if you believe this is a mistake."
+        )
+
+        bot.edit_message_text(
+            f"❌ Rejected payment request for user {u_id}.",
+            call.message.chat.id,
+            call.message.message_id
+        )
+
+        bot.answer_callback_query(call.id, "Payment rejected.")
+
+    except Exception as e:
+        bot.answer_callback_query(
+            call.id, "Could not reject this request.", show_alert=True
+        )
+        bot.send_message(ADMIN_ID, f"❌ Rejection Error: {e}")
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('manage_'))
 def manage_ch(call):
