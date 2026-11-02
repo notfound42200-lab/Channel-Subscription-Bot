@@ -515,7 +515,10 @@ def user_pays(call):
             )
         )
 
-        # Remove waiting message now that QR is ready.
+        # Keep the waiting message visible for 3 extra seconds.
+        time.sleep(3)
+
+        # Remove waiting message now that the QR is ready.
         try:
             bot.delete_message(
                 call.message.chat.id,
