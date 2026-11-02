@@ -442,6 +442,8 @@ def user_pays(call):
 
     bot.answer_callback_query(call.id)
 
+    waiting_msg = None
+
     try:
 
         _, ch_id, mins = call.data.split('_')
@@ -468,6 +470,13 @@ def user_pays(call):
                 "❌ Subscription plan not found."
             )
             return
+
+        # Show a waiting message while Razorpay creates the QR.
+        waiting_msg = bot.send_message(
+            call.message.chat.id,
+            "⏳ Your payment QR code is being generated. "
+            "This may take 5–10 seconds. Please wait…"
+        )
 
         # Create a new single-use QR for this user and plan.
         qr = create_payment_qr(
@@ -506,6 +515,15 @@ def user_pays(call):
             )
         )
 
+        # Remove waiting message now that QR is ready.
+        try:
+            bot.delete_message(
+                call.message.chat.id,
+                waiting_msg.message_id
+            )
+        except Exception as e:
+            print("Could not delete QR waiting message:", e)
+
         bot.send_photo(
             call.message.chat.id,
             qr['image_url'],
@@ -523,6 +541,16 @@ def user_pays(call):
     except Exception as e:
 
         print("QR creation error:", e)
+
+        # Remove waiting message if QR creation fails.
+        if waiting_msg:
+            try:
+                bot.delete_message(
+                    call.message.chat.id,
+                    waiting_msg.message_id
+                )
+            except Exception as delete_error:
+                print("Could not delete waiting message:", delete_error)
 
         bot.send_message(
             call.message.chat.id,
