@@ -1,4 +1,3 @@
-
 import os
 import time
 import requests
@@ -62,7 +61,14 @@ users_col = db['users']
 payments_col = db['payments']
 
 # Prevent the same Razorpay payment from being processed twice.
-payments_col.create_index("razorpay_payment_id", unique=True, sparse=True)
+payments_col.create_index(
+    "razorpay_payment_id",
+    unique=True,
+    sparse=True
+)
+
+# Reuse HTTP connections to reduce connection overhead.
+razorpay_session = requests.Session()
 
 
 # =========================================================
@@ -70,18 +76,41 @@ payments_col.create_index("razorpay_payment_id", unique=True, sparse=True)
 # =========================================================
 
 def razorpay_request(method, endpoint, **kwargs):
-    """Make an authenticated Razorpay API request."""
+    """Make an authenticated Razorpay API request and log duration."""
 
-    response = requests.request(
-        method,
-        f"{RAZORPAY_API}{endpoint}",
-        auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-        timeout=20,
-        **kwargs
-    )
+    started = time.monotonic()
 
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = razorpay_session.request(
+            method,
+            f"{RAZORPAY_API}{endpoint}",
+            auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
+            timeout=20,
+            **kwargs
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed = time.monotonic() - started
+
+        print(
+            f"Razorpay {method} {endpoint} "
+            f"completed in {elapsed:.2f} seconds"
+        )
+
+        return result
+
+    except Exception as e:
+
+        elapsed = time.monotonic() - started
+
+        print(
+            f"Razorpay {method} {endpoint} "
+            f"failed after {elapsed:.2f} seconds: {e}"
+        )
+
+        raise
 
 
 def create_payment_qr(user_id, channel_id, mins, price):
@@ -224,8 +253,8 @@ def start_handler(message):
 
                 return
 
-        except Exception:
-            pass
+        except Exception as e:
+            print("Start deep-link error:", e)
 
     # Admin greeting
     if user_id == ADMIN_ID:
@@ -250,7 +279,10 @@ def start_handler(message):
 # ADMIN: CHANNEL MANAGEMENT
 # =========================================================
 
-@bot.message_handler(commands=['channels'], func=lambda m: m.from_user.id == ADMIN_ID)
+@bot.message_handler(
+    commands=['channels'],
+    func=lambda m: m.from_user.id == ADMIN_ID
+)
 def list_channels(message):
 
     markup = InlineKeyboardMarkup()
@@ -293,7 +325,10 @@ def list_channels(message):
         )
 
 
-@bot.message_handler(commands=['add'], func=lambda m: m.from_user.id == ADMIN_ID)
+@bot.message_handler(
+    commands=['add'],
+    func=lambda m: m.from_user.id == ADMIN_ID
+)
 def add_channel_start(message):
 
     msg = bot.send_message(
@@ -385,7 +420,9 @@ def finalize_channel(message, ch_id, ch_name):
             f"https://t.me/{bot_username}?start={ch_id}"
         )
 
-    except Exception:
+    except Exception as e:
+
+        print("Channel setup error:", e)
 
         bot.send_message(
             ADMIN_ID,
@@ -398,7 +435,9 @@ def finalize_channel(message, ch_id, ch_name):
 # USER: CREATE RAZORPAY QR
 # =========================================================
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('select_'))
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith('select_')
+)
 def user_pays(call):
 
     bot.answer_callback_query(call.id)
@@ -496,7 +535,9 @@ def user_pays(call):
 # USER: VERIFY PAYMENT
 # =========================================================
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('paid_'))
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith('paid_')
+)
 def verify_payment(call):
 
     bot.answer_callback_query(
@@ -652,7 +693,9 @@ def verify_payment(call):
 # CHANNEL MANAGEMENT CALLBACK
 # =========================================================
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('manage_'))
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith('manage_')
+)
 def manage_ch(call):
 
     ch_id = int(call.data.split('_')[1])
